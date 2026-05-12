@@ -162,7 +162,7 @@ def install_debian():
         "--variant=minbase",
         "stable",
         str(DEBIAN),
-        "http://deb.debian.org/debian"                                                  "http://deb.debian.org/debian"
+        "http://deb.debian.org/debian"
     ])
 
 
@@ -170,7 +170,11 @@ def install_ubuntu():
     if UBUNTU.exists():
         subprocess.run(["rm", "-rf", str(UBUNTU)])
     subprocess.run([
-        "debootstrap"
+        "debootstrap",
+        "--variant=minbase",
+        "jammy",
+        str(UBUNTU),
+        "http://archive.ubuntu.com/ubuntu"
     ])
 
 # ----------------------------
@@ -180,31 +184,9 @@ def install_ubuntu():
 
 def install_rootfs(name):
     ROOTFS_DIR.mkdir(exist_ok=True)
-
-    if name == ""
-
-    if DEBIAN.exists():
-        subprocess.run(["rm", "-rf", str(DEBIAN)])
-    if UBUNTU.exists():
-        subprocess.run(["rm", "-rf", str(UBUNTU)])
-
-    print("[*] Installing Debian...")
-    subprocess.run([
-        "debootstrap",
-        "--variant=minbase",
-        "stable",
-        str(DEBIAN),
-        "http://deb.debian.org/debian"
-    ])
-
-    print("[*] Installing Ubuntu...")
-    subprocess.run([
-        "debootstrap",
-        "--variant=minbase",
-        "jammy",
-        str(UBUNTU),
-        "http://archive.ubuntu.com/ubuntu"
-    ])
+    
+    install_debian()    
+    install_ubuntu()
 
     print("[u2713] Install complete")
 
@@ -275,23 +257,29 @@ def update():
 def main():
     if len(sys.argv) < 2:
         print("""
-Devstick CLI
+            Devstick CLI
 
-Commands:
-  devstick install
-  devstick run debian
-  devstick run ubuntu
-  devstick update
+            Commands:
+            devstick install
+            devstick run debian
+            devstick run ubuntu
+            devstick update
         """)
         return
 
     cmd = sys.argv[1]
 
     if cmd == "run":
-        run_distro(sys.argv[2])
+        try: run_distro(sys.argv[2])
+        except IndexError: print("Wrong usage")
 
     elif cmd == "install":
-        install()
+        try:
+            if sys.argv[2] == "debian": install_debian()
+            elif sys.argv[2] == "ubuntu": install_ubuntu()
+            else: print("OS not found.")
+        except IndexError: install()
+
     elif cmd == "remove":
         remove(sys.argv[2])
 
