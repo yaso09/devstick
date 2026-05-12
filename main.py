@@ -272,8 +272,8 @@ def main():
     cmd = sys.argv[1]
 
     if cmd == "run":
-        try: run_distro(sys.argv[2])
-        except IndexError: print("Wrong usage")
+        if len(sys.argv) == 3: run_distro(sys.argv[2])
+        else: print("Wrong usage")
 
     elif cmd == "install":
         if len(sys.argv) == 3:
