@@ -184,7 +184,7 @@ def install_ubuntu():
 # ----------------------------
 
 
-def install_rootfs(name):
+def install_rootfs():
     ROOTFS_DIR.mkdir(exist_ok=True)
     
     install_debian()    
@@ -276,11 +276,12 @@ def main():
         except IndexError: print("Wrong usage")
 
     elif cmd == "install":
-        try:
+        if len(sys.argv) == 3:
             if sys.argv[2] == "debian": install_debian()
             elif sys.argv[2] == "ubuntu": install_ubuntu()
             else: print("OS not found.")
-        except IndexError: install()
+        elif len(sys.argv) == 2: install()
+        else: print("Wrong usage")
 
     elif cmd == "remove":
         remove(sys.argv[2])
