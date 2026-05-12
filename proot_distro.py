@@ -1,6 +1,6 @@
 import os
-import shutil
 import subprocess
+import shutil
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -14,80 +14,57 @@ PROOT_DISTRO_ROOT = os.path.expandvars(
     "$PREFIX/var/lib/proot-distro/installed-rootfs"
 )
 
-class TempDistroSession:
-    def __init__(self, name: str, source_path: str, shell="/bin/bash"):
+
+class TempBindDistro:
+    def __init__(self, name: str, rootfs_path: str):
         self.name = name
-        self.source_path = os.path.abspath(source_path)
+        self.rootfs_path = os.path.abspath(rootfs_path)
         self.target_path = os.path.join(PROOT_DISTRO_ROOT, name)
-        self.shell = shell
-        self.proc = None
 
     # ----------------------------
-    # INSTALL ROOTFS
+    # ATTACH ROOTFS (NO COPY)
     # ----------------------------
-    def _install(self):
+    def _attach(self):
         if os.path.exists(self.target_path):
-            shutil.rmtree(self.target_path)
+            raise RuntimeError(f"{self.target_path} already exists")
 
-        shutil.copytree(self.source_path, self.target_path)
+        print(f"[*] Binding rootfs → {self.target_path}")
 
-    # ----------------------------
-    # RESTORE ROOTFS
-    # ----------------------------
-    def _restore(self):
-        if os.path.exists(self.source_path):
-            return  # güvenli davran
-
-        shutil.move(self.target_path, self.source_path)
+        # 🔥 bind mount yerine symlink (Termux için en stabil yöntem)
+        os.symlink(self.rootfs_path, self.target_path)
 
     # ----------------------------
-    # START SESSION
+    # DETACH
     # ----------------------------
-    def start(self):
-        self._install()
-
-        self.proc = subprocess.Popen([
-            proot_distro_binary(),
-            "login",
-            self.name,
-            "--shared-tmp"
-        ])
-
-        return self.proc
+    def _detach(self):
+        if os.path.islink(self.target_path):
+            print("[*] Removing bind link")
+            os.unlink(self.target_path)
 
     # ----------------------------
-    # WAIT SESSION END
+    # RUN
     # ----------------------------
-    def wait(self):
-        if self.proc:
-            self.proc.wait()
-
-    # ----------------------------
-    # STOP + CLEANUP
-    # ----------------------------
-    def close(self):
+    def run(self):
         try:
-            if self.proc:
-                self.proc.terminate()
+            self._attach()
+
+            print(f"\n[*] Starting proot-distro: {self.name}\n")
+
+            subprocess.run([
+                proot_distro_binary(),
+                "login",
+                self.name,
+                "--shared-tmp"
+            ])
+
         finally:
-            self._restore()
-
-    # ----------------------------
-    # CONTEXT MANAGER SUPPORT
-    # ----------------------------
-    def __enter__(self):
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        self.close()
+            print("\n[*] Cleaning up session...\n")
+            self._detach()
 
 
 # ----------------------------
 # PUBLIC API
 # ----------------------------
-def run_temp_distro(name: str, path: Path):
-    session = TempDistroSession(name, path)
-    session.start()
-    session.wait()
-    session.close()
+def run_distro_temp(name: str, rootfs_path: str):
+    session = TempBindDistro(name, rootfs_path)
+    session.run()
