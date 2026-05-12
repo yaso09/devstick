@@ -1,14 +1,16 @@
-from tracer import Tracer
+from . import tracer
+
+Tracer = tracer.Tracer
 
 
 def run_pyproot(rootfs: str, cmd: list[str], bindings: dict[str, str] | None = None):
     """
-    PyProot çalıştırır.
+    PyProot u00e7alu0131u015ftu0131ru0131r.
 
     Args:
         rootfs: Root filesystem path
-        cmd: Çalıştırılacak komut ve argümanlar
-        bindings: {guest_path: host_path} şeklinde bind mount eşlemeleri
+        cmd: u00c7alu0131u015ftu0131ru0131lacak komut ve argu00fcmanlar
+        bindings: {guest_path: host_path} u015feklinde bind mount eu015flemeleri
     """
     bindings = bindings or {}
 
@@ -21,10 +23,10 @@ def run_pyproot(rootfs: str, cmd: list[str], bindings: dict[str, str] | None = N
 
 def parse_cli(argv: list[str]):
     """
-    Eski CLI davranışını koruyan parser.
+    Eski CLI davranu0131u015fu0131nu0131 koruyan parser.
     """
     if len(argv) < 3:
-        raise ValueError("Yetersiz argüman")
+        raise ValueError("Yetersiz argu00fcman")
 
     rootfs = argv[0]
     bindings = {}

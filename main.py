@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from pyproot.pyproot import run_pyproot
 import os
 import sys
 import platform
@@ -6,6 +7,7 @@ import subprocess
 import urllib.request
 import json
 from pathlib import Path
+from is_termux import is_termux
 
 # ----------------------------
 # PATHS
@@ -110,7 +112,12 @@ def run_distro(name):
         shell
     ]
 
-    os.execvp(cmd[0], cmd)
+    # os.execvp(cmd[0], cmd)
+
+    run_pyproot(
+        rootfs=str(rootfs),
+        cmd=[shell]
+    )
 
 
 # ----------------------------
@@ -157,27 +164,36 @@ def install_debian():
     if DEBIAN.exists():
         subprocess.run(["rm", "-rf", str(DEBIAN)])
     print("[*] Installing Debian...")
-    subprocess.run([
-        "sudo",
+    cmd = [
         "debootstrap",
         "--variant=minbase",
         "stable",
         str(DEBIAN),
         "http://deb.debian.org/debian"
-    ])
+    ]
+
+    if not is_termux():
+        cmd.insert(0, "sudo")
+
+    subprocess.run(cmd)
 
 
 def install_ubuntu():
     if UBUNTU.exists():
         subprocess.run(["rm", "-rf", str(UBUNTU)])
-    subprocess.run([
-        "sudo",
+    print("[*] Installing Ubuntu...")
+    cmd = [
         "debootstrap",
         "--variant=minbase",
         "jammy",
         str(UBUNTU),
         "http://archive.ubuntu.com/ubuntu"
-    ])
+    ]
+
+    if not is_termux():
+        cmd.insert(0, "sudo")
+
+    subprocess.run(cmd)
 
 # ----------------------------
 # DEBOOTSTRAP INSTALL
@@ -186,8 +202,8 @@ def install_ubuntu():
 
 def install_rootfs():
     ROOTFS_DIR.mkdir(exist_ok=True)
-    
-    install_debian()    
+
+    install_debian()
     install_ubuntu()
 
     print("[u2713] Install complete")
@@ -272,16 +288,23 @@ def main():
     cmd = sys.argv[1]
 
     if cmd == "run":
-        if len(sys.argv) == 3: run_distro(sys.argv[2])
-        else: print("Wrong usage")
+        if len(sys.argv) == 3:
+            run_distro(sys.argv[2])
+        else:
+            print("Wrong usage")
 
     elif cmd == "install":
         if len(sys.argv) == 3:
-            if sys.argv[2] == "debian": install_debian()
-            elif sys.argv[2] == "ubuntu": install_ubuntu()
-            else: print("OS not found.")
-        elif len(sys.argv) == 2: install()
-        else: print("Wrong usage")
+            if sys.argv[2] == "debian":
+                install_debian()
+            elif sys.argv[2] == "ubuntu":
+                install_ubuntu()
+            else:
+                print("OS not found.")
+        elif len(sys.argv) == 2:
+            install()
+        else:
+            print("Wrong usage")
 
     elif cmd == "remove":
         remove(sys.argv[2])
