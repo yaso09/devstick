@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from pyproot.pyproot import run_pyproot
+from pyproot.pyproot import start_sandbox
 import os
 import sys
 import platform
@@ -8,6 +8,7 @@ import urllib.request
 import json
 from pathlib import Path
 from is_termux import is_termux
+from proot_distro import run_distro_temp
 
 # ----------------------------
 # PATHS
@@ -62,9 +63,15 @@ def proot_binary():
     return str(p) if p.exists() else "proot"
 
 
+def proot_distro_binary():
+    p = PROOT_DIR / "proot-distro"
+    return str(p) if p.exists() else "proot-distro"
+
 # ----------------------------
 # ENV SANITIZER (IMPORTANT)
 # ----------------------------
+
+
 def sanitize_env():
     os.environ.pop("SHELL", None)
     os.environ["SHELL"] = "/bin/bash"
@@ -91,7 +98,7 @@ def run_distro(name):
     sanitize_env()
 
     shell = resolve_shell(rootfs)
-    proot = proot_binary()
+    proot = proot_distro_binary()
 
     print(f"[*] Arch: {arch()}")
     print(f"[*] Distro: {name}")
@@ -114,10 +121,13 @@ def run_distro(name):
 
     # os.execvp(cmd[0], cmd)
 
-    run_pyproot(
-        rootfs=str(rootfs),
-        cmd=[shell]
-    )
+    if is_termux():
+        run_distro_temp(name, rootfs)
+    else:
+        start_sandbox(
+            rootfs=str(rootfs),
+            cmd=[shell]
+        )
 
 
 # ----------------------------
