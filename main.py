@@ -141,20 +141,47 @@ def install_dependencies():
     if pm == "pkg":
         subprocess.run(["pkg", "install", "-y", "debootstrap", "proot"])
     elif pm == "apt":
-        subprocess.run(["sudo", "apt", "install", "-y", "debootstrap", "proot"])
+        subprocess.run(["sudo", "apt", "install",
+                       "-y", "debootstrap", "proot"])
     elif pm == "dnf":
-        subprocess.run(["sudo", "dnf", "install", "-y", "debootstrap", "proot"])
+        subprocess.run(["sudo", "dnf", "install",
+                       "-y", "debootstrap", "proot"])
     elif pm == "pacman":
-        subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "debootstrap", "proot"])
+        subprocess.run(
+            ["sudo", "pacman", "-S", "--noconfirm", "debootstrap", "proot"])
     elif pm == "apk":
         subprocess.run(["sudo", "apk", "add", "debootstrap", "proot"])
 
 
+def install_debian():
+    if DEBIAN.exists():
+        subprocess.run(["rm", "-rf", str(DEBIAN)])
+    print("[*] Installing Debian...")
+    subprocess.run([
+        "debootstrap",
+        "--variant=minbase",
+        "stable",
+        str(DEBIAN),
+        "http://deb.debian.org/debian"                                                  "http://deb.debian.org/debian"
+    ])
+
+
+def install_ubuntu():
+    if UBUNTU.exists():
+        subprocess.run(["rm", "-rf", str(UBUNTU)])
+    subprocess.run([
+        "debootstrap"
+    ])
+
 # ----------------------------
 # DEBOOTSTRAP INSTALL
 # ----------------------------
-def install_rootfs():
+
+
+def install_rootfs(name):
     ROOTFS_DIR.mkdir(exist_ok=True)
+
+    if name == ""
 
     if DEBIAN.exists():
         subprocess.run(["rm", "-rf", str(DEBIAN)])
@@ -179,17 +206,39 @@ def install_rootfs():
         "http://archive.ubuntu.com/ubuntu"
     ])
 
-    print("[✓] Install complete")
+    print("[u2713] Install complete")
 
 
 def install():
     install_dependencies()
     install_rootfs()
 
+# ----------------------------
+# REMOVE ROOTFS
+# ----------------------------
+
+
+def remove(name):
+    rootfs = None
+    if name == "debian":
+        rootfs = DEBIAN
+    elif name == "ubuntu":
+        rootfs = UBUNTU
+    else:
+        print(f"[!] OS not found.")
+        sys.exit(1)
+    if rootfs.exists():
+        subprocess.run(["rm", "-rf", str(rootfs)])
+        print(f"[u2713] Removed {name}")
+    else:
+        print("[!] Rootfs not found.")
+        sys.exit(1)
 
 # ----------------------------
 # UPDATE CHECK (GITHUB RELEASES)
 # ----------------------------
+
+
 def get_latest_release():
     try:
         data = json.loads(urllib.request.urlopen(GITHUB_API).read().decode())
@@ -213,7 +262,7 @@ def update():
     print(f"[*] Latest : {latest}")
 
     if current == latest:
-        print("[✓] Up to date")
+        print("[u2713] Up to date")
         return
 
     print("[*] Update available (manual apply recommended)")
@@ -243,6 +292,8 @@ Commands:
 
     elif cmd == "install":
         install()
+    elif cmd == "remove":
+        remove(sys.argv[2])
 
     elif cmd == "update":
         update()
