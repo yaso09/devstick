@@ -158,6 +158,7 @@ def install_debian():
         subprocess.run(["rm", "-rf", str(DEBIAN)])
     print("[*] Installing Debian...")
     subprocess.run([
+        "sudo",
         "debootstrap",
         "--variant=minbase",
         "stable",
@@ -170,6 +171,7 @@ def install_ubuntu():
     if UBUNTU.exists():
         subprocess.run(["rm", "-rf", str(UBUNTU)])
     subprocess.run([
+        "sudo",
         "debootstrap",
         "--variant=minbase",
         "jammy",
