@@ -3,12 +3,13 @@ from pyproot.pyproot import start_sandbox
 import os
 import sys
 import platform
+import shutil
 import subprocess
 import urllib.request
 import json
 from pathlib import Path
 from is_termux import is_termux
-from proot_distro import run_distro_temp
+from run_proot_distro import run_distro_temp
 
 # ----------------------------
 # PATHS
@@ -146,6 +147,38 @@ def detect_pkg_manager():
 # ----------------------------
 # INSTALL DEPENDENCIES
 # ----------------------------
+def install_proot_distro():
+    print("[*] Installing proot-distro for Termux")
+
+    PROOT_DISTRO_DIR = BASE_DIR / "proot-distro"
+
+    if PROOT_DISTRO_DIR.exists():
+        shutil.rmtree(PROOT_DISTRO_DIR)
+
+    subprocess.run([
+        "git",
+        "clone",
+        "https://github.com/termux/proot-distro.git"
+    ])
+
+    for item in PROOT_DISTRO_DIR.iterdir():
+        if item.name == "proot_distro":
+            continue
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+
+    d = PROOT_DISTRO_DIR / "proot_distro"
+
+    for item in d.iterdir():
+        target = PROOT_DISTRO_DIR / item.name
+        shutil.move(str(item), str(target))
+
+    shutil.rmtree(d)
+    os.rename(PROOT_DISTRO_DIR, "proot_distro")
+
+
 def install_dependencies():
     pm = detect_pkg_manager()
 
@@ -220,6 +253,8 @@ def install_rootfs():
 
 
 def install():
+    if is_termux():
+        install_proot_distro()
     install_dependencies()
     install_rootfs()
 
