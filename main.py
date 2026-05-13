@@ -147,38 +147,6 @@ def detect_pkg_manager():
 # ----------------------------
 # INSTALL DEPENDENCIES
 # ----------------------------
-def install_proot_distro():
-    print("[*] Installing proot-distro for Termux")
-
-    PROOT_DISTRO_DIR = BASE_DIR / "proot-distro"
-
-    if PROOT_DISTRO_DIR.exists():
-        shutil.rmtree(PROOT_DISTRO_DIR)
-
-    subprocess.run([
-        "git",
-        "clone",
-        "https://github.com/termux/proot-distro.git"
-    ])
-
-    for item in PROOT_DISTRO_DIR.iterdir():
-        if item.name == "proot_distro":
-            continue
-        if item.is_dir():
-            shutil.rmtree(item)
-        else:
-            item.unlink()
-
-    d = PROOT_DISTRO_DIR / "proot_distro"
-
-    for item in d.iterdir():
-        target = PROOT_DISTRO_DIR / item.name
-        shutil.move(str(item), str(target))
-
-    shutil.rmtree(d)
-    os.rename(PROOT_DISTRO_DIR, "proot_distro")
-
-
 def install_dependencies():
     pm = detect_pkg_manager()
 
