@@ -292,6 +292,8 @@ def main():
 
             Commands:
             devstick install
+            devstick install debian
+            devstick install ubuntu
             devstick run debian
             devstick run ubuntu
             devstick update
