@@ -3,13 +3,18 @@
 from pyproot import PRoot
 import os
 import sys
-import crypt
 import platform
 import shutil
 import subprocess
 import urllib.request
 import json
 from pathlib import Path
+
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+from rich import box
 
 from is_termux import is_termux
 from run_for_termux import run_distro_temp
@@ -31,69 +36,65 @@ GITHUB_API = "https://api.github.com/repos/yaso09/devstick/releases/latest"
 
 PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
 
+console = Console()
+
 
 # ─────────────────────────────────────────
-# COLORS
+# LOGGING HELPERS
 # ─────────────────────────────────────────
-class C:
-    RED    = "\033[91m"
-    GREEN  = "\033[92m"
-    YELLOW = "\033[93m"
-    CYAN   = "\033[96m"
-    BOLD   = "\033[1m"
-    RESET  = "\033[0m"
-
-def ok(msg):    print(f"{C.GREEN}[✓]{C.RESET} {msg}")
-def err(msg):   print(f"{C.RED}[✗]{C.RESET} {msg}")
-def info(msg):  print(f"{C.CYAN}[*]{C.RESET} {msg}")
-def warn(msg):  print(f"{C.YELLOW}[!]{C.RESET} {msg}")
+def ok(msg):   console.print(f"[bold green][✓][/bold green] {msg}")
+def err(msg):  console.print(f"[bold red][✗][/bold red] {msg}")
+def info(msg): console.print(f"[bold cyan][*][/bold cyan] {msg}")
+def warn(msg): console.print(f"[bold yellow][!][/bold yellow] {msg}")
 
 
 # ─────────────────────────────────────────
 # HELP
 # ─────────────────────────────────────────
-HELP = f"""
-{C.BOLD}Devstick{C.RESET} — Termux Linux container manager
+def print_help():
+    commands = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+    commands.add_column("Command", style="cyan bold", no_wrap=True)
+    commands.add_column("Description")
 
-{C.BOLD}USAGE{C.RESET}
-  devstick <command> [options]
+    commands.add_row("install",               "Install both distros")
+    commands.add_row("install <distro>",       "Install a specific distro")
+    commands.add_row("  --reinstall",          "Remove existing rootfs before installing")
+    commands.add_row("run <distro>",           "Start an interactive shell")
+    commands.add_row("  --user <username>",    "Log in as a specific user")
+    commands.add_row("  -- <cmd> [args...]",   "Run a command instead of a shell")
+    commands.add_row("register <distro>",      "Create a new user")
+    commands.add_row("  --username <name>",    "")
+    commands.add_row("  --password <pass>",    "")
+    commands.add_row("  --root",               "Grant sudo privileges")
+    commands.add_row("delete-user <distro>",   "Delete a user")
+    commands.add_row("  --username <name>",    "")
+    commands.add_row("  --keep-home",          "Do not remove the home directory")
+    commands.add_row("list-users <distro>",    "List registered users")
+    commands.add_row("remove <distro>",        "Delete a distro's rootfs")
+    commands.add_row("update",                 "Check for Devstick updates")
 
-{C.BOLD}COMMANDS{C.RESET}
+    examples = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+    examples.add_column("Example", style="dim")
+    for ex in [
+        "devstick install",
+        "devstick run debian --user yasir",
+        "devstick run debian -- python3 app.py",
+        "devstick register debian --username yasir --password 123 --root",
+        "devstick delete-user debian --username yasir",
+        "devstick list-users debian",
+    ]:
+        examples.add_row(ex)
 
-  {C.CYAN}install{C.RESET}                     Install both distros
-  {C.CYAN}install{C.RESET} <distro>            Install a specific distro
-    --reinstall                 Remove existing rootfs before installing
-
-  {C.CYAN}run{C.RESET} <distro>               Start an interactive shell
-    --user <username>           Log in as a specific user
-    -- <cmd> [args...]          Run a command instead of a shell
-
-  {C.CYAN}register{C.RESET} <distro>          Create a new user
-    --username <name>
-    --password <pass>
-    --root                      Grant sudo privileges
-
-  {C.CYAN}delete-user{C.RESET} <distro>       Delete a user
-    --username <name>
-    --keep-home                 Do not remove the home directory
-
-  {C.CYAN}list-users{C.RESET} <distro>        List registered users
-
-  {C.CYAN}remove{C.RESET} <distro>            Delete a distro's rootfs
-
-  {C.CYAN}update{C.RESET}                     Check for Devstick updates
-
-{C.BOLD}DISTROS{C.RESET}
-  debian, ubuntu
-
-{C.BOLD}EXAMPLES{C.RESET}
-  devstick install
-  devstick run debian --user yasir
-  devstick run debian -- python3 app.py
-  devstick register debian --username yasir --password 123 --root
-  devstick delete-user debian --username yasir
-  devstick list-users debian
-"""
+    console.print(Panel(
+        Text("Devstick", style="bold"),
+        subtitle="Termux Linux container manager",
+        border_style="cyan",
+    ))
+    console.print("\n[bold]COMMANDS[/bold]")
+    console.print(commands)
+    console.print("[bold]DISTROS[/bold]   debian, ubuntu\n")
+    console.print("[bold]EXAMPLES[/bold]")
+    console.print(examples)
 
 
 # ─────────────────────────────────────────
@@ -101,6 +102,38 @@ HELP = f"""
 # ─────────────────────────────────────────
 def arch():
     return platform.machine()
+
+
+# ─────────────────────────────────────────
+# PASSWORD HASHING  (replaces removed `crypt` module)
+# ─────────────────────────────────────────
+def _hash_password(password: str) -> str:
+    """Return a SHA-512 crypt(3) hash compatible with /etc/shadow."""
+    try:
+        # passlib is the cleanest cross-platform option
+        from passlib.hash import sha512_crypt          # type: ignore
+        return sha512_crypt.using(rounds=5000).hash(password)
+    except ImportError:
+        pass
+
+    try:
+        # Python ≤ 3.12 still ships the (deprecated) crypt module
+        import crypt  # noqa: PLC0415
+        return crypt.crypt(password, crypt.mksalt(crypt.METHOD_SHA512))
+    except ImportError:
+        pass
+
+    # Last resort: call openssl directly (available on most Linux/Termux)
+    result = subprocess.run(
+        ["openssl", "passwd", "-6", "-stdin"],
+        input=password.encode(),
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.decode().strip()
+
+    err("Cannot hash password: install passlib  (pip install passlib)")
+    sys.exit(1)
 
 
 # ─────────────────────────────────────────
@@ -231,7 +264,7 @@ def _manual_create_user(rootfs: Path, username: str, password: str, is_root: boo
 
     # ── shadow ──────────────────────────────
     shadow_file = rootfs / "etc/shadow"
-    hashed      = crypt.crypt(password, crypt.mksalt(crypt.METHOD_SHA512))
+    hashed      = _hash_password(password)
     shadow_line = f"{username}:{hashed}:19000:0:99999:7:::\n"
     _append_if_missing(shadow_file, username + ":", shadow_line)
 
@@ -389,7 +422,6 @@ def delete_user(distro: str, username: str, keep_home: bool = False):
 
     info(f"Deleting user: {username}")
 
-    # ── Try userdel via proot ────────────────
     shell = resolve_shell(rootfs)
     flag  = "" if keep_home else "-r"
     script = f"#!/bin/sh\nuserdel {flag} {username} 2>/dev/null || true\n"
@@ -414,10 +446,8 @@ def delete_user(distro: str, username: str, keep_home: bool = False):
         if script_path.exists():
             script_path.unlink()
 
-    # ── Manual cleanup (always run to be safe) ──
     _manual_delete_user(rootfs, username, keep_home)
 
-    # ── Remove from DB ──────────────────────────
     users[distro].pop(username, None)
     save_users(users)
 
@@ -432,7 +462,6 @@ def _manual_delete_user(rootfs: Path, username: str, keep_home: bool):
         lines    = f.read_text().splitlines(keepends=True)
         filtered = [l for l in lines if not l.startswith(username + ":")]
 
-        # Also remove from group member lists
         if filepath in ("etc/group", "etc/gshadow"):
             cleaned = []
             for line in filtered:
@@ -452,7 +481,7 @@ def _manual_delete_user(rootfs: Path, username: str, keep_home: bool):
             shutil.rmtree(str(home))
             info(f"Removed home directory: /home/{username}")
         else:
-            info(f"Home directory not found, skipping")
+            info("Home directory not found, skipping")
 
 
 # ─────────────────────────────────────────
@@ -461,18 +490,22 @@ def _manual_delete_user(rootfs: Path, username: str, keep_home: bool):
 def list_users(distro: str):
     get_rootfs(distro)  # validate distro name
 
-    users  = load_users()
+    users        = load_users()
     distro_users = users.get(distro, {})
 
     if not distro_users:
         info(f"No registered users for {distro}")
         return
 
-    print(f"\n{C.BOLD}Users in {distro}:{C.RESET}")
+    table = Table(title=f"Users in {distro}", box=box.ROUNDED, border_style="cyan")
+    table.add_column("Username", style="cyan bold")
+    table.add_column("Role", justify="center")
+
     for name, meta in distro_users.items():
-        role = f"{C.YELLOW}sudo{C.RESET}" if meta.get("root") else "normal"
-        print(f"  {C.CYAN}{name}{C.RESET}  [{role}]")
-    print()
+        role = "[yellow]sudo[/yellow]" if meta.get("root") else "normal"
+        table.add_row(name, role)
+
+    console.print(table)
 
 
 # ─────────────────────────────────────────
@@ -493,7 +526,7 @@ def run_distro(name: str, user: str = None, command: list = None):
     info(f"Shell: {shell}")
     if user:
         info(f"User: {user}")
-    print(f"{C.BOLD}[*] Starting Devstick...{C.RESET}\n")
+    console.print("[bold][*] Starting Devstick...[/bold]\n")
 
     if is_termux():
         _inject_proot_to_path()
@@ -647,7 +680,7 @@ def main():
     args = sys.argv[1:]
 
     if not args or args[0] in ("-h", "--help", "help"):
-        print(HELP)
+        print_help()
         return
 
     cmd = args[0]
@@ -672,61 +705,46 @@ def main():
             err("Usage: devstick run <distro> [--user <name>] [-- cmd]")
             sys.exit(1)
 
-        distro  = args[1]
-        user    = _get(args, "--user")
-        command = None
+        distro = args[1]
+        user   = _get(args, "--user")
 
+        command = None
         if "--" in args:
-            command = args[args.index("--") + 1:]
+            sep_idx = args.index("--")
+            command = args[sep_idx + 1:]
 
         run_distro(distro, user=user, command=command)
 
     # ── register ─────────────────────────
     elif cmd == "register":
         if len(args) < 2:
-            err("Usage: devstick register <distro> --username <n> --password <p>")
+            err("Usage: devstick register <distro> --username <n> --password <p> [--root]")
             sys.exit(1)
-
         distro   = args[1]
         username = _get(args, "--username")
         password = _get(args, "--password")
+        is_root  = _has(args, "--root")
 
         if not username or not password:
             err("--username and --password are required")
             sys.exit(1)
 
-        register_user(
-            distro=distro,
-            username=username,
-            password=password,
-            is_root=_has(args, "--root"),
-        )
+        register_user(distro, username, password, is_root)
 
     # ── delete-user ──────────────────────
     elif cmd == "delete-user":
         if len(args) < 2:
-            err("Usage: devstick delete-user <distro> --username <name>")
+            err("Usage: devstick delete-user <distro> --username <n>")
             sys.exit(1)
-
-        distro   = args[1]
-        username = _get(args, "--username")
+        distro    = args[1]
+        username  = _get(args, "--username")
+        keep_home = _has(args, "--keep-home")
 
         if not username:
             err("--username is required")
             sys.exit(1)
 
-        # Confirm
-        print(f"{C.YELLOW}[!] This will delete user '{username}' from {distro}.{C.RESET}")
-        confirm = input("    Continue? [y/N] ").strip().lower()
-        if confirm != "y":
-            info("Cancelled")
-            return
-
-        delete_user(
-            distro=distro,
-            username=username,
-            keep_home=_has(args, "--keep-home"),
-        )
+        delete_user(distro, username, keep_home)
 
     # ── list-users ───────────────────────
     elif cmd == "list-users":
@@ -748,7 +766,7 @@ def main():
 
     else:
         err(f"Unknown command: '{cmd}'")
-        print(f"Run {C.CYAN}devstick --help{C.RESET} for usage.")
+        print_help()
         sys.exit(1)
 
 
