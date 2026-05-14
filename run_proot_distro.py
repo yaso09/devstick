@@ -166,6 +166,8 @@ class TempBindDistro:
                 env["USER"] = "root"
                 env["LOGNAME"] = "root"
 
+                cmd.insert(1, "-0")
+
                 cmd += [shell]
 
             # ----------------------------
