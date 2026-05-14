@@ -179,6 +179,7 @@ def run_distro(name):
             .bind("/proc")
             .bind("/sys")
             .bind("/dev")
+            .workdir("/")
         )
 
         subprocess.run(
