@@ -174,28 +174,16 @@ def run_distro(name):
         _inject_proot_to_path()
         run_distro_temp(name, rootfs)
     else:
-        pr = PRoot(rootfs=str(rootfs))
-        proc = pr.popen(
-            [shell],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT
+        pr = (
+            PRoot(rootfs=str(rootfs))
+            .bind("/proc")
+            .bind("/sys")
+            .bind("/dev")
         )
 
-        while True:
-            inp = input(">>> ")
-            
-            if inp == "exit":
-                proc.stdin.write("exit\n")
-                proc.stdin.flush()
-                break
-            
-            proc.stdin.write(inp + "\n")
-            proc.stdin.flush()
-
-            # çıktı oku
-            output = proc.stdout.readline()
-            print(output, end="")
+        subprocess.run(
+            pr.build_argv([shell])
+        )
 
 # ----------------------------
 # PACKAGE MANAGER DETECTION
