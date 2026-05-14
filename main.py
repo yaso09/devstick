@@ -21,13 +21,12 @@ from run_for_termux import run_distro_temp
 BASE_DIR = Path(__file__).resolve().parent
 
 ROOTFS_DIR = BASE_DIR / "rootfs"
-PROOT_DIR = BASE_DIR / "proot"
+PROOT_DIR  = BASE_DIR / "proot"
 
 DEBIAN = ROOTFS_DIR / "debian"
 UBUNTU = ROOTFS_DIR / "ubuntu"
 
-USERS_DB = BASE_DIR / ".users.json"
-
+USERS_DB   = BASE_DIR / ".users.json"
 GITHUB_API = "https://api.github.com/repos/yaso09/devstick/releases/latest"
 
 PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
@@ -83,7 +82,7 @@ def resolve_shell(rootfs: Path):
 # PROOT BINARY
 # ----------------------------
 def proot_binary() -> str:
-    a = arch()
+    a       = arch()
     android = is_termux()
 
     if android:
@@ -155,47 +154,6 @@ def sanitize_env():
 
 
 # ----------------------------
-# PROOT ARGV BUILDER
-# Termux ve desktop için ortak low-level builder.
-# run_distro_temp'in build ettiği cmd ile aynı
-# mantığı paylaşır; register gibi root işlemleri
-# için command= alır.
-# ----------------------------
-def _build_proot_argv(rootfs: Path, command: list[str]) -> list[str]:
-    """
-    Root modunda (fake-root) proot argv döner.
-    Yalnızca iç setup komutları için kullanılır.
-    """
-    if is_termux():
-        _inject_proot_to_path()
-        proot = proot_binary()
-    else:
-        proot = proot_binary()
-
-    shell = resolve_shell(rootfs)
-
-    cmd = [
-        proot,
-        "-0",                    # fake-root
-        "--kill-on-exit",
-        "-r", str(rootfs),
-        "-b", "/dev",
-        "-b", "/proc",
-        "-b", "/sys",
-        "-w", "/root",
-    ]
-
-    # Termux'ta /sdcard bağlanabilir
-    if is_termux():
-        cmd += ["-b", "/sdcard:/sdcard"]
-
-    # Verilen komutu shell üzerinden çalıştır
-    cmd += [shell, "-c", " && ".join(command)]
-
-    return cmd
-
-
-# ----------------------------
 # USER REGISTER
 # ----------------------------
 def register_user(distro, username, password, is_root=False):
@@ -210,11 +168,23 @@ def register_user(distro, username, password, is_root=False):
     print(f"[*] Creating user: {username}")
     print("[*] Installing user management tools...")
 
-    install_cmd = r"""
+    if is_root:
+        if (rootfs / "etc/debian_version").exists():
+            sudo_block = f"""usermod -aG sudo {username}
+mkdir -p /etc/sudoers.d
+echo '%sudo ALL=(ALL:ALL) ALL' > /etc/sudoers.d/devstick
+chmod 440 /etc/sudoers.d/devstick"""
+        else:
+            sudo_block = f"usermod -aG wheel {username}"
+    else:
+        sudo_block = ""
+
+    script = f"""#!/bin/sh
+set -e
+
 if command -v apt >/dev/null 2>&1; then
-    apt update &&
-    DEBIAN_FRONTEND=noninteractive apt install -y \
-        passwd login sudo bash coreutils
+    apt update
+    DEBIAN_FRONTEND=noninteractive apt install -y passwd login sudo bash coreutils
 elif command -v apk >/dev/null 2>&1; then
     apk add shadow sudo bash
 elif command -v pacman >/dev/null 2>&1; then
@@ -222,55 +192,47 @@ elif command -v pacman >/dev/null 2>&1; then
 elif command -v dnf >/dev/null 2>&1; then
     dnf install -y shadow-utils sudo bash
 fi
+
+useradd -m -s {shell} {username}
+echo '{username}:{password}' | chpasswd
+{sudo_block}
 """
 
-    cmds = [
-        f"useradd -m -s {shell} {username}",
-        f"echo '{username}:{password}' | chpasswd",
-    ]
+    script_path = rootfs / "tmp" / "_devstick_register.sh"
+    script_path.write_text(script)
+    script_path.chmod(0o700)
 
-    if is_root:
-        if (rootfs / "etc/debian_version").exists():
-            cmds += [
-                f"usermod -aG sudo {username}",
-                "mkdir -p /etc/sudoers.d",
-                "echo '%sudo ALL=(ALL:ALL) ALL' > /etc/sudoers.d/devstick",
-                "chmod 440 /etc/sudoers.d/devstick",
-            ]
+    try:
+        if is_termux():
+            _inject_proot_to_path()
+
+            result = run_distro_temp(
+                rootfs=str(rootfs),
+                user=None,
+                command=[shell, "/tmp/_devstick_register.sh"],
+            )
+
         else:
-            cmds.append(f"usermod -aG wheel {username}")
+            pr = (
+                PRoot(rootfs=str(rootfs))
+                .bind("/proc")
+                .bind("/sys")
+                .bind("/dev")
+                .workdir("/root")
+            )
 
-    full_cmd = install_cmd.strip() + "\n" + " && ".join(cmds)
+            result = subprocess.run(
+                pr.build_argv([shell, "/tmp/_devstick_register.sh"])
+            )
 
-    # ----------------------------
-    # Termux: run_distro_temp ile
-    # Desktop: PRoot ile
-    # ----------------------------
-    if is_termux():
-        _inject_proot_to_path()
+        if result is not None and result.returncode != 0:
+            print("[!] Failed to create user")
+            sys.exit(1)
 
-        result = run_distro_temp(
-            rootfs=str(rootfs),
-            user=None,           # root modunda çalıştır
-            command=[shell, "-c", full_cmd],
-        )
-
-    else:
-        pr = (
-            PRoot(rootfs=str(rootfs))
-            .bind("/proc")
-            .bind("/sys")
-            .bind("/dev")
-            .workdir("/root")
-        )
-
-        result = subprocess.run(
-            pr.build_argv([shell, "-c", full_cmd])
-        )
-
-    if result is not None and result.returncode != 0:
-        print("[!] Failed to create user")
-        sys.exit(1)
+    finally:
+        if script_path.exists():
+            script_path.unlink()
+            print("[*] Register script removed")
 
     users = load_users()
     users.setdefault(distro, {})[username] = {"root": is_root}
@@ -388,8 +350,11 @@ def install_debian():
 
     print("[*] Installing Debian...")
 
-    cmd = ["debootstrap", "--variant=minbase", "stable", str(DEBIAN),
-           "http://deb.debian.org/debian"]
+    cmd = [
+        "debootstrap", "--variant=minbase",
+        "stable", str(DEBIAN),
+        "http://deb.debian.org/debian"
+    ]
 
     if not is_termux():
         cmd.insert(0, "sudo")
@@ -405,8 +370,11 @@ def install_ubuntu():
 
     print("[*] Installing Ubuntu...")
 
-    cmd = ["debootstrap", "--variant=minbase", "jammy", str(UBUNTU),
-           "http://archive.ubuntu.com/ubuntu"]
+    cmd = [
+        "debootstrap", "--variant=minbase",
+        "jammy", str(UBUNTU),
+        "http://archive.ubuntu.com/ubuntu"
+    ]
 
     if not is_termux():
         cmd.insert(0, "sudo")
@@ -521,8 +489,8 @@ Commands:
             print("Wrong usage")
             return
 
-        distro = sys.argv[2]
-        user = None
+        distro  = sys.argv[2]
+        user    = None
         command = None
 
         if "--user" in sys.argv:
@@ -533,9 +501,8 @@ Commands:
                 print("[!] Missing username")
                 return
 
-        # devstick run debian -- python3 app.py
         if "--" in sys.argv:
-            sep = sys.argv.index("--")
+            sep     = sys.argv.index("--")
             command = sys.argv[sep + 1:]
 
         run_distro(distro, user=user, command=command or None)
