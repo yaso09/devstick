@@ -1,17 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
+
+binary_files = []
+
+for path in glob("pyproot/binaries/*"):
+    if os.path.isfile(path):
+        binary_files.append((path, "pyproot/binaries"))
 
 a = Analysis(
     ['main.py'],
 
     pathex=['.'],
 
-    binaries=[
-        # PRoot binary inclusion
-        ('proot/arm64/proot', 'proot/arm64'),
-        ('proot/x86_64/proot', 'proot/x86_64'),
-    ],
+    binaries=binary_files,
 
     datas=[
         # Rootfs included as runtime data
