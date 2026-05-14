@@ -109,4 +109,3 @@ def update_proot_distro():
 
 
 update_pyproot()
-update_proot_distro()

@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from is_termux import is_termux
-from run_proot_distro import run_distro_temp
+from run_for_termux import run_distro_temp
 
 
 # ----------------------------
@@ -276,7 +276,7 @@ fi
 
     result = subprocess.run(
         pr.build_argv([
-            "/bin/sh",
+            shell,
             "-c",
             full_cmd
         ])
