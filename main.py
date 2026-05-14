@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from pyproot import PRoot
 import os
 import sys
@@ -7,23 +8,28 @@ import shutil
 import subprocess
 import urllib.request
 import json
+
 from pathlib import Path
+
 from is_termux import is_termux
 from run_proot_distro import run_distro_temp
+
 
 # ----------------------------
 # PATHS
 # ----------------------------
 BASE_DIR = Path(__file__).resolve().parent
+
 ROOTFS_DIR = BASE_DIR / "rootfs"
 PROOT_DIR = BASE_DIR / "proot"
 
 DEBIAN = ROOTFS_DIR / "debian"
 UBUNTU = ROOTFS_DIR / "ubuntu"
 
+USERS_DB = BASE_DIR / ".users.json"
+
 GITHUB_API = "https://api.github.com/repos/yaso09/devstick/releases/latest"
 
-# pyproot tarafu0131ndan indirilen binary'lerin bulunduu011fu dizin
 PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
 
 
@@ -35,14 +41,44 @@ def arch():
 
 
 # ----------------------------
-# SAFE SHELL RESOLVER (CRITICAL FIX)
+# USERS DB
+# ----------------------------
+def load_users():
+    if USERS_DB.exists():
+        return json.loads(USERS_DB.read_text())
+
+    return {}
+
+
+def save_users(data):
+    USERS_DB.write_text(json.dumps(data, indent=2))
+
+
+# ----------------------------
+# ROOTFS RESOLVER
+# ----------------------------
+def get_rootfs(name):
+    if name == "debian":
+        return DEBIAN
+
+    elif name == "ubuntu":
+        return UBUNTU
+
+    print("[!] Invalid distro")
+    sys.exit(1)
+
+
+# ----------------------------
+# SAFE SHELL RESOLVER
 # ----------------------------
 def resolve_shell(rootfs: Path):
     """
-    NEVER allow /usr/bin/bash (PRoot-safe rule)
+    NEVER allow /usr/bin/bash
     """
+
     if (rootfs / "bin/bash").exists():
         return "/bin/bash"
+
     if (rootfs / "bin/sh").exists():
         return "/bin/sh"
 
@@ -56,37 +92,41 @@ def resolve_shell(rootfs: Path):
 def proot_binary() -> str:
     """
     Resolution order:
-      1. pyproot/binaries/proot-<arch>-android  (Termux)
-      2. pyproot/binaries/proot-<arch>          (desktop)
-      3. proot/  klasu00f6ru00fcndeki eski binary
+
+      1. pyproot/binaries/proot-<arch>-android
+      2. pyproot/binaries/proot-<arch>
+      3. proot/
       4. system proot
     """
+
     a = arch()
     android = is_termux()
 
-    # 1. pyproot/binaries iu00e7indeki binary
     if android:
         candidate = PYPROOT_BINARIES_DIR / f"proot-{a}-android"
+
         if candidate.exists():
             return str(candidate)
 
     candidate = PYPROOT_BINARIES_DIR / f"proot-{a}"
+
     if candidate.exists():
         return str(candidate)
 
-    # 2. Eski proot/ dizini (geriye du00f6nu00fck uyumluluk)
     if a == "aarch64":
         legacy = PROOT_DIR / "arm64" / "proot"
+
     elif a == "x86_64":
         legacy = PROOT_DIR / "x86_64" / "proot"
+
     else:
         legacy = None
 
     if legacy and legacy.exists():
         return str(legacy)
 
-    # 3. System proot
     system = shutil.which("proot")
+
     if system:
         return system
 
@@ -96,45 +136,54 @@ def proot_binary() -> str:
 
 def proot_distro_binary() -> str:
     p = PROOT_DIR / "proot-distro"
+
     return str(p) if p.exists() else "proot-distro"
 
 
+# ----------------------------
+# PATH INJECTION
+# ----------------------------
 def _inject_proot_to_path():
-    """
-    Termux'ta proot-distro'nun shutil.which("proot") ile
-    bizim binary'mizi bulmasu0131 iu00e7in PATH'e enjekte et.
-    """
     if not PYPROOT_BINARIES_DIR.exists():
         return
 
     a = arch()
 
-    # android binary varsa onu, yoksa desktop binary'yi "proot" adu0131yla symlink/copy et
     android_bin = PYPROOT_BINARIES_DIR / f"proot-{a}-android"
     desktop_bin = PYPROOT_BINARIES_DIR / f"proot-{a}"
+
     proot_link = PYPROOT_BINARIES_DIR / "proot"
 
-    source = android_bin if android_bin.exists(
-    ) else desktop_bin if desktop_bin.exists() else None
+    source = (
+        android_bin
+        if android_bin.exists()
+        else desktop_bin
+        if desktop_bin.exists()
+        else None
+    )
 
     if source and not proot_link.exists():
         try:
             proot_link.symlink_to(source)
-        except OSError:
-            # symlink bau015faru0131su0131z olursa kopyala
-            import shutil as _shutil
-            _shutil.copy2(str(source), str(proot_link))
-            proot_link.chmod(proot_link.stat().st_mode | 0o111)
 
-    # PATH'e en bau015fa ekle
+        except OSError:
+            import shutil as _shutil
+
+            _shutil.copy2(str(source), str(proot_link))
+
+            proot_link.chmod(
+                proot_link.stat().st_mode | 0o111
+            )
+
     current_path = os.environ.get("PATH", "")
     binaries_str = str(PYPROOT_BINARIES_DIR)
+
     if binaries_str not in current_path.split(":"):
         os.environ["PATH"] = binaries_str + ":" + current_path
 
 
 # ----------------------------
-# ENV SANITIZER (IMPORTANT)
+# ENV SANITIZER
 # ----------------------------
 def sanitize_env():
     os.environ.pop("SHELL", None)
@@ -142,37 +191,104 @@ def sanitize_env():
 
 
 # ----------------------------
-# RUN DISTRO
+# USER REGISTER
 # ----------------------------
-def run_distro(name):
-    rootfs = None
-
-    if name == "debian":
-        rootfs = DEBIAN
-    elif name == "ubuntu":
-        rootfs = UBUNTU
-    else:
-        print("Usage: devstick run [debian|ubuntu]")
-        sys.exit(1)
+def register_user(
+    distro,
+    username,
+    password,
+    is_root=False
+):
+    rootfs = get_rootfs(distro)
 
     if not rootfs.exists():
-        print("[!] Rootfs not found. Run: devstick install")
+        print("[!] Rootfs not installed")
+        sys.exit(1)
+
+    shell = resolve_shell(rootfs)
+
+    print(f"[*] Creating user: {username}")
+
+    pr = (
+        PRoot(rootfs=str(rootfs))
+        .bind("/proc")
+        .bind("/sys")
+        .bind("/dev")
+        .workdir("/")
+    )
+
+    cmds = [
+        f"useradd -m -s {shell} {username}",
+        f"echo '{username}:{password}' | chpasswd"
+    ]
+
+    if is_root:
+        if (rootfs / "usr/bin/apt").exists():
+            cmds.append(
+                f"usermod -aG sudo {username}"
+            )
+
+        elif (rootfs / "usr/bin/pacman").exists():
+            cmds.append(
+                f"usermod -aG wheel {username}"
+            )
+
+    full_cmd = " && ".join(cmds)
+
+    subprocess.run(
+        pr.build_argv([
+            "/bin/sh",
+            "-c",
+            full_cmd
+        ])
+    )
+
+    users = load_users()
+
+    users.setdefault(distro, {})
+
+    users[distro][username] = {
+        "root": is_root
+    }
+
+    save_users(users)
+
+    print(f"[✓] User created: {username}")
+
+
+# ----------------------------
+# RUN DISTRO
+# ----------------------------
+def run_distro(name, user=None):
+    rootfs = get_rootfs(name)
+
+    if not rootfs.exists():
+        print("[!] Rootfs not found")
+        print("[!] Run: devstick install")
         sys.exit(1)
 
     sanitize_env()
 
     shell = resolve_shell(rootfs)
-    proot = proot_distro_binary()
 
     print(f"[*] Arch: {arch()}")
     print(f"[*] Distro: {name}")
     print(f"[*] Shell: {shell}")
+
+    if user:
+        print(f"[*] User: {user}")
+
     print("[*] Starting Devstick...\n")
 
     if is_termux():
-        # proot-distro shutil.which("proot") kullandu0131u011fu0131 iu00e7in PATH'e enjekte et
         _inject_proot_to_path()
-        run_distro_temp(name, rootfs)
+
+        run_distro_temp(
+            name=name,
+            rootfs=rootfs,
+            user=user
+        )
+
     else:
         pr = (
             PRoot(rootfs=str(rootfs))
@@ -182,20 +298,38 @@ def run_distro(name):
             .workdir("/")
         )
 
+        if user:
+            cmd = [
+                "/bin/su",
+                "-",
+                user
+            ]
+
+        else:
+            cmd = [shell]
+
         subprocess.run(
-            pr.build_argv([shell])
+            pr.build_argv(cmd)
         )
+
 
 # ----------------------------
 # PACKAGE MANAGER DETECTION
 # ----------------------------
-
-
 def detect_pkg_manager():
-    managers = ["apt", "dnf", "apk", "pacman", "pkg"]
+    managers = [
+        "apt",
+        "dnf",
+        "apk",
+        "pacman",
+        "pkg"
+    ]
 
     for m in managers:
-        if subprocess.run(["which", m], stdout=subprocess.DEVNULL).returncode == 0:
+        if subprocess.run(
+            ["which", m],
+            stdout=subprocess.DEVNULL
+        ).returncode == 0:
             return m
 
     return None
@@ -214,24 +348,63 @@ def install_dependencies():
         sys.exit(1)
 
     if pm == "pkg":
-        subprocess.run(["pkg", "install", "-y", "debootstrap", "proot"])
+        subprocess.run([
+            "pkg",
+            "install",
+            "-y",
+            "debootstrap",
+            "proot"
+        ])
+
     elif pm == "apt":
-        subprocess.run(["sudo", "apt", "install",
-                       "-y", "debootstrap", "proot"])
+        subprocess.run([
+            "sudo",
+            "apt",
+            "install",
+            "-y",
+            "debootstrap",
+            "proot"
+        ])
+
     elif pm == "dnf":
-        subprocess.run(["sudo", "dnf", "install",
-                       "-y", "debootstrap", "proot"])
+        subprocess.run([
+            "sudo",
+            "dnf",
+            "install",
+            "-y",
+            "debootstrap",
+            "proot"
+        ])
+
     elif pm == "pacman":
-        subprocess.run(
-            ["sudo", "pacman", "-S", "--noconfirm", "debootstrap", "proot"])
+        subprocess.run([
+            "sudo",
+            "pacman",
+            "-S",
+            "--noconfirm",
+            "debootstrap",
+            "proot"
+        ])
+
     elif pm == "apk":
-        subprocess.run(["sudo", "apk", "add", "debootstrap", "proot"])
+        subprocess.run([
+            "sudo",
+            "apk",
+            "add",
+            "debootstrap",
+            "proot"
+        ])
 
 
+# ----------------------------
+# INSTALL DISTROS
+# ----------------------------
 def install_debian():
     if DEBIAN.exists():
         subprocess.run(["rm", "-rf", str(DEBIAN)])
+
     print("[*] Installing Debian...")
+
     cmd = [
         "debootstrap",
         "--variant=minbase",
@@ -249,7 +422,9 @@ def install_debian():
 def install_ubuntu():
     if UBUNTU.exists():
         subprocess.run(["rm", "-rf", str(UBUNTU)])
+
     print("[*] Installing Ubuntu...")
+
     cmd = [
         "debootstrap",
         "--variant=minbase",
@@ -265,7 +440,7 @@ def install_ubuntu():
 
 
 # ----------------------------
-# DEBOOTSTRAP INSTALL
+# INSTALL ROOTFS
 # ----------------------------
 def install_rootfs():
     ROOTFS_DIR.mkdir(exist_ok=True)
@@ -273,12 +448,13 @@ def install_rootfs():
     install_debian()
     install_ubuntu()
 
-    print("[u2713] Install complete")
+    print("[✓] Install complete")
 
 
 def install():
     if is_termux():
         install_proot_distro()
+
     install_dependencies()
     install_rootfs()
 
@@ -287,29 +463,35 @@ def install():
 # REMOVE ROOTFS
 # ----------------------------
 def remove(name):
-    rootfs = None
-    if name == "debian":
-        rootfs = DEBIAN
-    elif name == "ubuntu":
-        rootfs = UBUNTU
-    else:
-        print(f"[!] OS not found.")
-        sys.exit(1)
+    rootfs = get_rootfs(name)
+
     if rootfs.exists():
-        subprocess.run(["rm", "-rf", str(rootfs)])
-        print(f"[u2713] Removed {name}")
+        subprocess.run([
+            "rm",
+            "-rf",
+            str(rootfs)
+        ])
+
+        print(f"[✓] Removed {name}")
+
     else:
-        print("[!] Rootfs not found.")
+        print("[!] Rootfs not found")
         sys.exit(1)
 
 
 # ----------------------------
-# UPDATE CHECK (GITHUB RELEASES)
+# UPDATE CHECK
 # ----------------------------
 def get_latest_release():
     try:
-        data = json.loads(urllib.request.urlopen(GITHUB_API).read().decode())
+        data = json.loads(
+            urllib.request.urlopen(
+                GITHUB_API
+            ).read().decode()
+        )
+
         return data["tag_name"]
+
     except Exception as e:
         print("[!] Update check failed:", e)
         return None
@@ -319,20 +501,27 @@ def update():
     print("[*] Checking updates...")
 
     latest = get_latest_release()
+
     if not latest:
         return
 
     version_file = BASE_DIR / ".version"
-    current = version_file.read_text().strip() if version_file.exists() else "none"
+
+    current = (
+        version_file.read_text().strip()
+        if version_file.exists()
+        else "none"
+    )
 
     print(f"[*] Current: {current}")
     print(f"[*] Latest : {latest}")
 
     if current == latest:
-        print("[u2713] Up to date")
+        print("[✓] Up to date")
         return
 
-    print("[*] Update available (manual apply recommended)")
+    print("[*] Update available")
+
     version_file.write_text(latest)
 
 
@@ -342,42 +531,131 @@ def update():
 def main():
     if len(sys.argv) < 2:
         print("""
-            Devstick CLI
+Devstick CLI
 
-            Commands:
-            devstick install
-            devstick install debian
-            devstick install ubuntu
-            devstick run debian
-            devstick run ubuntu
-            devstick update
-        """)
+Commands:
+
+devstick install
+devstick install debian
+devstick install ubuntu
+
+devstick run debian
+devstick run ubuntu
+
+devstick run debian --user yasir
+
+devstick register debian \
+  --username yasir \
+  --password 123
+
+devstick register debian \
+  --username yasir \
+  --password 123 \
+  --root
+
+devstick remove debian
+devstick update
+""")
         return
 
     cmd = sys.argv[1]
 
+    # ----------------------------
+    # RUN
+    # ----------------------------
     if cmd == "run":
-        if len(sys.argv) == 3:
-            run_distro(sys.argv[2])
-        else:
+        if len(sys.argv) < 3:
             print("Wrong usage")
+            return
 
+        distro = sys.argv[2]
+
+        user = None
+
+        if "--user" in sys.argv:
+            idx = sys.argv.index("--user")
+
+            try:
+                user = sys.argv[idx + 1]
+
+            except IndexError:
+                print("[!] Missing username")
+                return
+
+        run_distro(
+            distro,
+            user=user
+        )
+
+    # ----------------------------
+    # INSTALL
+    # ----------------------------
     elif cmd == "install":
         if len(sys.argv) == 3:
             if sys.argv[2] == "debian":
                 install_debian()
+
             elif sys.argv[2] == "ubuntu":
                 install_ubuntu()
+
             else:
-                print("OS not found.")
+                print("OS not found")
+
         elif len(sys.argv) == 2:
             install()
+
         else:
             print("Wrong usage")
 
+    # ----------------------------
+    # REGISTER
+    # ----------------------------
+    elif cmd == "register":
+        if len(sys.argv) < 3:
+            print("Wrong usage")
+            return
+
+        distro = sys.argv[2]
+
+        username = None
+        password = None
+
+        if "--username" in sys.argv:
+            username = sys.argv[
+                sys.argv.index("--username") + 1
+            ]
+
+        if "--password" in sys.argv:
+            password = sys.argv[
+                sys.argv.index("--password") + 1
+            ]
+
+        if not username or not password:
+            print("[!] Missing username/password")
+            return
+
+        is_root = "--root" in sys.argv
+
+        register_user(
+            distro=distro,
+            username=username,
+            password=password,
+            is_root=is_root
+        )
+
+    # ----------------------------
+    # REMOVE
+    # ----------------------------
     elif cmd == "remove":
+        if len(sys.argv) < 3:
+            print("Wrong usage")
+            return
+
         remove(sys.argv[2])
 
+    # ----------------------------
+    # UPDATE
+    # ----------------------------
     elif cmd == "update":
         update()
 
