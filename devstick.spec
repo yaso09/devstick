@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from PyInstaller.utils.hooks import collect_submodules
+from glob import glob
+import os
 
 block_cipher = None
 
