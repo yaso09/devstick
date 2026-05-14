@@ -224,8 +224,7 @@ def register_user(
 
     install_cmd = r"""
 if command -v apt >/dev/null 2>&1; then
-    apt update &&
-    DEBIAN_FRONTEND=noninteractive apt install -y \
+    apt update && DEBIAN_FRONTEND=noninteractive apt install -y \
         passwd \
         login \
         sudo \
