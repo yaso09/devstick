@@ -51,7 +51,8 @@ class TempBindDistro:
         if os.path.islink(self.target_path):
             os.unlink(self.target_path)
         elif os.path.exists(self.target_path):
-            raise RuntimeError(f"{self.target_path} gerçek bir dizin — silmiyorum")
+            raise RuntimeError(
+                f"{self.target_path} geru00e7ek bir dizin u2014 silmiyorum")
 
         print(f"[*] Binding rootfs: {self.target_path}")
         os.symlink(self.rootfs_path, self.target_path)
@@ -102,6 +103,6 @@ class TempBindDistro:
             self._detach()
 
 
-def run_distro_temp(name: str, rootfs_path: str):
-    session = TempBindDistro(name, rootfs_path)
+def run_distro_temp(name: str, rootfs: str):
+    session = TempBindDistro(name, rootfs)
     session.run()

@@ -214,7 +214,7 @@ def register_user(
         .bind("/proc")
         .bind("/sys")
         .bind("/dev")
-        .workdir("/")
+        .workdir("/root")
     )
 
     print("[*] Installing user management tools...")
@@ -296,11 +296,13 @@ fi
 
     save_users(users)
 
-    print(f"[✓] User created: {username}")
+    print(f"[u2713] User created: {username}")
 
 # ----------------------------
 # RUN DISTRO
 # ----------------------------
+
+
 def run_distro(name, user=None):
     rootfs = get_rootfs(name)
 
@@ -337,7 +339,7 @@ def run_distro(name, user=None):
             .bind("/proc")
             .bind("/sys")
             .bind("/dev")
-            .workdir("/")
+            .workdir("/root")
         )
 
         if user:
@@ -389,7 +391,7 @@ def install_dependencies():
         print("[!] No package manager found")
         sys.exit(1)
 
-    if pm == "pkg":
+    if pm == "pkg" or is_termux():
         subprocess.run([
             "pkg",
             "install",
@@ -442,6 +444,8 @@ def install_dependencies():
 # INSTALL DISTROS
 # ----------------------------
 def install_debian():
+    install_dependencies()
+
     if DEBIAN.exists():
         subprocess.run(["rm", "-rf", str(DEBIAN)])
 
@@ -462,6 +466,8 @@ def install_debian():
 
 
 def install_ubuntu():
+    install_dependencies()
+
     if UBUNTU.exists():
         subprocess.run(["rm", "-rf", str(UBUNTU)])
 
@@ -490,13 +496,10 @@ def install_rootfs():
     install_debian()
     install_ubuntu()
 
-    print("[✓] Install complete")
+    print("[u2713] Install complete")
 
 
 def install():
-    if is_termux():
-        install_proot_distro()
-
     install_dependencies()
     install_rootfs()
 
@@ -514,7 +517,7 @@ def remove(name):
             str(rootfs)
         ])
 
-        print(f"[✓] Removed {name}")
+        print(f"[u2713] Removed {name}")
 
     else:
         print("[!] Rootfs not found")
@@ -559,7 +562,7 @@ def update():
     print(f"[*] Latest : {latest}")
 
     if current == latest:
-        print("[✓] Up to date")
+        print("[u2713] Up to date")
         return
 
     print("[*] Update available")
