@@ -18,11 +18,11 @@ PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
 # PROOT BINARY
 # ----------------------------
 def get_proot_binary() -> str:
-    a = platform.machine()
+    arch = platform.machine()
 
     for name in [
-        f"proot-{a}-android",
-        f"proot-{a}",
+        f"proot-{arch}-android",
+        f"proot-{arch}",
         "proot"
     ]:
         candidate = PYPROOT_BINARIES_DIR / name
@@ -33,12 +33,12 @@ def get_proot_binary() -> str:
     if system:
         return system
 
-    print("[!] No proot binary found")
+    print("[!] proot binary not found")
     sys.exit(1)
 
 
 # ----------------------------
-# SHELL RESOLVE
+# SHELL
 # ----------------------------
 def resolve_shell(rootfs: str) -> str:
     rootfs = Path(rootfs)
@@ -49,12 +49,12 @@ def resolve_shell(rootfs: str) -> str:
     if (rootfs / "bin/sh").exists():
         return "/bin/sh"
 
-    print("[!] No shell found in rootfs")
+    print("[!] no shell in rootfs")
     sys.exit(1)
 
 
 # ----------------------------
-# TEMP DISTRO SESSION
+# SESSION
 # ----------------------------
 class TempBindDistro:
     def __init__(self, name: str, rootfs_path: str, user: str | None = None):
@@ -68,7 +68,7 @@ class TempBindDistro:
         )
 
     # ----------------------------
-    # BIND ROOTFS
+    # BIND
     # ----------------------------
     def _attach(self):
         if os.path.islink(self.target_path):
@@ -76,20 +76,20 @@ class TempBindDistro:
 
         elif os.path.exists(self.target_path):
             raise RuntimeError(
-                f"{self.target_path} exists and is not symlink"
+                f"{self.target_path} is not a symlink"
             )
 
         os.symlink(self.rootfs_path, self.target_path)
 
     # ----------------------------
-    # CLEANUP
+    # CLEAN
     # ----------------------------
     def _detach(self):
         if os.path.islink(self.target_path):
             os.unlink(self.target_path)
 
     # ----------------------------
-    # RUN SESSION (DEVSTICK STYLE)
+    # RUN
     # ----------------------------
     def run(self):
         try:
@@ -98,16 +98,14 @@ class TempBindDistro:
             proot = get_proot_binary()
             shell = resolve_shell(self.rootfs_path)
 
+            user = self.user if self.user else None
+
             print(f"[*] proot: {proot}")
             print(f"[*] rootfs: {self.rootfs_path}")
-            if self.user:
-                print(f"[*] user: {self.user}")
+            print(f"[*] user: {user if user else 'root'}")
             print()
 
-            # ----------------------------
-            # BASE PROOT COMMAND
-            # ----------------------------
-            home = f"/home/{self.user}" if self.user else "/root"
+            home = f"/home/{user}" if user else "/root"
 
             cmd = [
                 proot,
@@ -120,15 +118,14 @@ class TempBindDistro:
                 "-b", "/sdcard:/sdcard",
 
                 "-w", home,
-
                 "--"
             ]
 
-            # ----------------------------
-            # DEVSTICK LOGIN LOGIC (IMPORTANT PART)
-            # ----------------------------
             env = os.environ.copy()
 
+            # ----------------------------
+            # GLOBAL SAFE PATH (CRITICAL)
+            # ----------------------------
             env["PATH"] = (
                 "/usr/local/sbin:"
                 "/usr/local/bin:"
@@ -140,31 +137,36 @@ class TempBindDistro:
 
             env["TERM"] = os.environ.get("TERM", "xterm-256color")
             env["LANG"] = "C.UTF-8"
-
             env.pop("LD_PRELOAD", None)
 
-            if self.user:
-                # Devstick-style: NO su, NO login shell
-                env["HOME"] = f"/home/{self.user}"
-                env["USER"] = self.user
-                env["LOGNAME"] = self.user
+            # ----------------------------
+            # USER MODE (DEVSTICK STYLE)
+            # ----------------------------
+            if user:
+                env["HOME"] = f"/home/{user}"
+                env["USER"] = user
+                env["LOGNAME"] = user
 
                 cmd += [
                     "/usr/bin/env",
                     "-i",
-                    f"HOME=/home/{self.user}",
-                    f"USER={self.user}",
-                    f"LOGNAME={self.user}",
+                    f"HOME=/home/{user}",
+                    f"USER={user}",
+                    f"LOGNAME={user}",
                     "TERM=xterm-256color",
                     "LANG=C.UTF-8",
                     "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                     shell
                 ]
 
+            # ----------------------------
+            # ROOT MODE (DEFAULT)
+            # ----------------------------
             else:
                 env["HOME"] = "/root"
                 env["USER"] = "root"
                 env["LOGNAME"] = "root"
+
                 cmd += [shell]
 
             # ----------------------------
@@ -184,12 +186,7 @@ class TempBindDistro:
 
 
 # ----------------------------
-# PUBLIC API
+# API
 # ----------------------------
 def run_distro_temp(name: str, rootfs: str, user: str | None = None):
-    session = TempBindDistro(
-        name=name,
-        rootfs_path=rootfs,
-        user=user
-    )
-    session.run()
+    TempBindDistro(name, rootfs, user).run()
