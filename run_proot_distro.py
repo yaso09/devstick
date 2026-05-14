@@ -3,7 +3,7 @@ import subprocess
 import shutil
 from pathlib import Path
 import sys
-
+import platform
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -18,8 +18,6 @@ PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
 # PROOT BINARY
 # ----------------------------
 def get_proot_binary() -> str:
-    import platform
-
     a = platform.machine()
 
     for name in [
@@ -28,12 +26,10 @@ def get_proot_binary() -> str:
         "proot"
     ]:
         candidate = PYPROOT_BINARIES_DIR / name
-
         if candidate.exists():
             return str(candidate)
 
     system = shutil.which("proot")
-
     if system:
         return system
 
@@ -42,7 +38,7 @@ def get_proot_binary() -> str:
 
 
 # ----------------------------
-# SHELL RESOLUTION
+# SHELL RESOLVE
 # ----------------------------
 def resolve_shell(rootfs: str) -> str:
     rootfs = Path(rootfs)
@@ -58,20 +54,12 @@ def resolve_shell(rootfs: str) -> str:
 
 
 # ----------------------------
-# TEMP BIND DISTRO
+# TEMP DISTRO SESSION
 # ----------------------------
 class TempBindDistro:
-    def __init__(
-        self,
-        name: str,
-        rootfs_path: str,
-        user: str | None = None
-    ):
+    def __init__(self, name: str, rootfs_path: str, user: str | None = None):
         self.name = name
-        self.rootfs_path = os.path.abspath(
-            str(rootfs_path)
-        )
-
+        self.rootfs_path = str(Path(rootfs_path).resolve())
         self.user = user
 
         self.target_path = os.path.join(
@@ -80,7 +68,7 @@ class TempBindDistro:
         )
 
     # ----------------------------
-    # ATTACH
+    # BIND ROOTFS
     # ----------------------------
     def _attach(self):
         if os.path.islink(self.target_path):
@@ -88,27 +76,20 @@ class TempBindDistro:
 
         elif os.path.exists(self.target_path):
             raise RuntimeError(
-                f"{self.target_path} gerçek bir dizin — silmiyorum"
+                f"{self.target_path} exists and is not symlink"
             )
 
-        print(f"[*] Binding rootfs: {self.target_path}")
-
-        os.symlink(
-            self.rootfs_path,
-            self.target_path
-        )
+        os.symlink(self.rootfs_path, self.target_path)
 
     # ----------------------------
-    # DETACH
+    # CLEANUP
     # ----------------------------
     def _detach(self):
         if os.path.islink(self.target_path):
-            print("[*] Removing bind link")
-
             os.unlink(self.target_path)
 
     # ----------------------------
-    # RUN
+    # RUN SESSION (DEVSTICK STYLE)
     # ----------------------------
     def run(self):
         try:
@@ -117,122 +98,98 @@ class TempBindDistro:
             proot = get_proot_binary()
             shell = resolve_shell(self.rootfs_path)
 
-            print(f"[*] proot binary: {proot}")
-            print(f"[*] Starting distro: {self.name}")
-
+            print(f"[*] proot: {proot}")
+            print(f"[*] rootfs: {self.rootfs_path}")
             if self.user:
-                print(f"[*] User: {self.user}")
-
+                print(f"[*] user: {self.user}")
             print()
 
             # ----------------------------
-            # BASE COMMAND
+            # BASE PROOT COMMAND
             # ----------------------------
+            home = f"/home/{self.user}" if self.user else "/root"
+
             cmd = [
                 proot,
-
                 "--kill-on-exit",
-                "--link2symlink",
-
-                "-0",
-
                 "-r", self.rootfs_path,
 
                 "-b", "/dev",
                 "-b", "/proc",
                 "-b", "/sys",
-
                 "-b", "/sdcard:/sdcard",
 
-                "-w",
-                "/root",
+                "-w", home,
+
+                "--"
             ]
 
             # ----------------------------
-            # USER LOGIN
-            # ----------------------------
-            if self.user:
-                su_path = Path(
-                    self.rootfs_path
-                ) / "bin" / "su"
-
-                if not su_path.exists():
-                    print("[!] /bin/su not found")
-                    print("[!] Install login/passwd package")
-                    sys.exit(1)
-
-                cmd.extend([
-                    "/bin/su",
-                    self.user
-                ])
-
-            else:
-                cmd.append(shell)
-
-            # ----------------------------
-            # ENV
+            # DEVSTICK LOGIN LOGIC (IMPORTANT PART)
             # ----------------------------
             env = os.environ.copy()
 
-            env["PROOT_TMP_DIR"] = str(
-                Path(self.rootfs_path) / "tmp"
+            env["PATH"] = (
+                "/usr/local/sbin:"
+                "/usr/local/bin:"
+                "/usr/sbin:"
+                "/usr/bin:"
+                "/sbin:"
+                "/bin"
             )
 
-            env["TERM"] = os.environ.get(
-                "TERM",
-                "xterm-256color"
-            )
-
+            env["TERM"] = os.environ.get("TERM", "xterm-256color")
             env["LANG"] = "C.UTF-8"
 
             env.pop("LD_PRELOAD", None)
 
-            # USER ENV
             if self.user:
+                # Devstick-style: NO su, NO login shell
                 env["HOME"] = f"/home/{self.user}"
                 env["USER"] = self.user
                 env["LOGNAME"] = self.user
+
+                cmd += [
+                    "/usr/bin/env",
+                    "-i",
+                    f"HOME=/home/{self.user}",
+                    f"USER={self.user}",
+                    f"LOGNAME={self.user}",
+                    "TERM=xterm-256color",
+                    "LANG=C.UTF-8",
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    shell
+                ]
 
             else:
                 env["HOME"] = "/root"
                 env["USER"] = "root"
                 env["LOGNAME"] = "root"
-
-            os.makedirs(
-                str(Path(self.rootfs_path) / "tmp"),
-                exist_ok=True
-            )
+                cmd += [shell]
 
             # ----------------------------
-            # RUN
+            # EXEC
             # ----------------------------
             subprocess.run(
                 cmd,
                 env=env,
-
                 stdin=sys.stdin,
                 stdout=sys.stdout,
                 stderr=sys.stderr
             )
 
         finally:
-            print("\n[*] Cleaning up session...\n")
-
+            print("\n[*] cleanup...\n")
             self._detach()
 
 
 # ----------------------------
 # PUBLIC API
 # ----------------------------
-def run_distro_temp(
-    name: str,
-    rootfs: str,
-    user: str | None = None
-):
+def run_distro_temp(name: str, rootfs: str, user: str | None = None):
     session = TempBindDistro(
         name=name,
         rootfs_path=rootfs,
         user=user
     )
-
     session.run()
