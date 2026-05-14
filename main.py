@@ -193,9 +193,6 @@ def sanitize_env():
 # ----------------------------
 # USER REGISTER
 # ----------------------------
-# ----------------------------
-# USER REGISTER
-# ----------------------------
 def register_user(
     distro,
     username,
@@ -224,7 +221,8 @@ def register_user(
 
     install_cmd = r"""
 if command -v apt >/dev/null 2>&1; then
-    apt update && DEBIAN_FRONTEND=noninteractive apt install -y \
+    apt update &&
+    DEBIAN_FRONTEND=noninteractive apt install -y \
         passwd \
         login \
         sudo \
@@ -248,18 +246,22 @@ fi
     ]
 
     if is_root:
-        # sudo grubu distroya göre değişebilir
         if (rootfs / "etc/debian_version").exists():
             cmds.append(
                 f"usermod -aG sudo {username}"
             )
 
-            sudoers_fix = (
-                "echo '%sudo ALL=(ALL:ALL) ALL' "
-                "> /etc/sudoers.d/devstick"
+            cmds.append(
+                "mkdir -p /etc/sudoers.d"
             )
 
-            cmds.append(sudoers_fix)
+            cmds.append(
+                "echo '%sudo ALL=(ALL:ALL) ALL' > /etc/sudoers.d/devstick"
+            )
+
+            cmds.append(
+                "chmod 440 /etc/sudoers.d/devstick"
+            )
 
         else:
             cmds.append(
@@ -268,7 +270,7 @@ fi
 
     full_cmd = (
         install_cmd
-        + "\n && "
+        + "\n"
         + " && ".join(cmds)
     )
 
@@ -295,7 +297,6 @@ fi
     save_users(users)
 
     print(f"[✓] User created: {username}")
-
 
 # ----------------------------
 # RUN DISTRO
