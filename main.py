@@ -179,16 +179,23 @@ def run_distro(name):
             [shell],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.STDOUT
         )
 
         while True:
-            inp = input(">>>")
+            inp = input(">>> ")
+            
             if inp == "exit":
+                proc.stdin.write("exit\n")
+                proc.stdin.flush()
                 break
-            else:
-                stdout, stderr = proc.communicate(inp)
-                print(stdout)
+            
+            proc.stdin.write(inp + "\n")
+            proc.stdin.flush()
+
+            # çıktı oku
+            output = proc.stdout.readline()
+            print(output, end="")
 
 # ----------------------------
 # PACKAGE MANAGER DETECTION
