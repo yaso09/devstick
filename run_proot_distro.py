@@ -3,51 +3,105 @@ import subprocess
 import shutil
 from pathlib import Path
 import sys
-import proot_distro_api
-
-pd = proot_distro_api.ProotDistro()
 
 BASE_DIR = Path(__file__).resolve().parent
 
 PROOT_DISTRO_ROOT = os.path.expandvars(
-	"$PREFIX/var/lib/proot-distro/installed-rootfs"
+    "$PREFIX/var/lib/proot-distro/installed-rootfs"
 )
 
+# pyproot/binaries dizinindeki binary'leri bul
+PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
+
+
+def get_proot_binary() -> str:
+    import platform
+    a = platform.machine()
+
+    for name in [f"proot-{a}-android", f"proot-{a}", "proot"]:
+        candidate = PYPROOT_BINARIES_DIR / name
+        if candidate.exists():
+            return str(candidate)
+
+    system = shutil.which("proot")
+    if system:
+        return system
+
+    print("[!] No proot binary found")
+    sys.exit(1)
+
+
+def resolve_shell(rootfs: str) -> str:
+    rootfs = Path(rootfs)
+    if (rootfs / "bin/bash").exists():
+        return "/bin/bash"
+    if (rootfs / "bin/sh").exists():
+        return "/bin/sh"
+    print("[!] No shell found in rootfs")
+    sys.exit(1)
+
+
 class TempBindDistro:
-	def __init__(self, name: str, rootfs_path: str):
-		self.name = name
-		self.rootfs_path = os.path.abspath(rootfs_path)
-		self.target_path = os.path.join(PROOT_DISTRO_ROOT, name)
+    def __init__(self, name: str, rootfs_path: str):
+        self.name = name
+        self.rootfs_path = os.path.abspath(rootfs_path)
+        self.target_path = os.path.join(PROOT_DISTRO_ROOT, name)
 
-	def _attach(self):
-		if os.path.islink(self.target_path):
-			os.unlink(self.target_path)
-		elif os.path.exists(self.target_path):
-			raise RuntimeError(f"{self.target_path} gerçek bir dizin — silmiyorum")
+    def _attach(self):
+        if os.path.islink(self.target_path):
+            os.unlink(self.target_path)
+        elif os.path.exists(self.target_path):
+            raise RuntimeError(f"{self.target_path} gerçek bir dizin — silmiyorum")
 
-		print(f"[*] Binding rootfs: {self.target_path}")
-		os.symlink(self.rootfs_path, self.target_path)
+        print(f"[*] Binding rootfs: {self.target_path}")
+        os.symlink(self.rootfs_path, self.target_path)
 
-	def _detach(self):
-		if os.path.islink(self.target_path):
-			print("[*] Removing bind link")
-			os.unlink(self.target_path)
+    def _detach(self):
+        if os.path.islink(self.target_path):
+            print("[*] Removing bind link")
+            os.unlink(self.target_path)
 
-	def run(self):
-		try:
-			self._attach()
+    def run(self):
+        try:
+            self._attach()
 
-			print(f"\n[*] Starting proot-distro: {self.name}\n")
+            proot = get_proot_binary()
+            shell = resolve_shell(self.rootfs_path)
 
-			pd.login(
-				self.name,
-				shared_tmp=True
-			)
+            print(f"[*] proot binary: {proot}")
+            print(f"[*] Starting distro: {self.name}\n")
 
-		finally:
-			print("\n[*] Cleaning up session...\n")
-			self._detach()
+            cmd = [
+                proot,
+                "--kill-on-exit",
+                "--link2symlink",
+                "-0",
+                "-r", self.rootfs_path,
+                "-b", "/dev",
+                "-b", "/proc",
+                "-b", "/sys",
+                "-b", f"/sdcard:/sdcard",
+                "-w", "/root",
+                "--",
+                shell,
+            ]
+
+            env = os.environ.copy()
+            env["PROOT_TMP_DIR"] = str(Path(self.rootfs_path) / "tmp")
+            env["HOME"] = "/root"
+            env["TERM"] = os.environ.get("TERM", "xterm-256color")
+            env["LANG"] = "C.UTF-8"
+            env.pop("LD_PRELOAD", None)
+
+            os.makedirs(str(Path(self.rootfs_path) / "tmp"), exist_ok=True)
+
+            subprocess.run(cmd, env=env)
+
+        finally:
+            print("\n[*] Cleaning up session...\n")
+            self._detach()
+
 
 def run_distro_temp(name: str, rootfs_path: str):
-	session = TempBindDistro(name, rootfs_path)
-	session.run()
+    session = TempBindDistro(name, rootfs_path)
+    session.run()
