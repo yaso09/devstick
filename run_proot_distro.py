@@ -88,7 +88,7 @@ class TempBindDistro:
 
         elif os.path.exists(self.target_path):
             raise RuntimeError(
-                f"{self.target_path} geru00e7ek bir dizin u2014 silmiyorum"
+                f"{self.target_path} gerçek bir dizin — silmiyorum"
             )
 
         print(f"[*] Binding rootfs: {self.target_path}")
@@ -163,7 +163,6 @@ class TempBindDistro:
 
                 cmd.extend([
                     "/bin/su",
-                    "-",
                     self.user
                 ])
 
