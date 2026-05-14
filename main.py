@@ -348,13 +348,13 @@ def run_distro(name, user=None):
                 "-",
                 user
             ]
-
+            argv = pr.build_argv(cmd)
         else:
             cmd = [shell]
+            argv = pr.build_argv(cmd)
+            argv.insert(1, "-0")
 
-        subprocess.run(
-            pr.build_argv(cmd)
-        )
+        subprocess.run(argv)
 
 
 # ----------------------------
