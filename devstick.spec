@@ -12,6 +12,13 @@ for path in glob("pyproot/binaries/*"):
     if os.path.isfile(path):
         binary_files.append((path, "pyproot/binaries"))
 
+rich_datas, rich_binaries, rich_hiddenimports = collect_all('rich')
+
+datas = [('rootfs', 'rootfs')]
+datas += rich_datas
+
+binary_files += rich_binaries
+
 a = Analysis(
     ['main.py'],
 
@@ -19,12 +26,9 @@ a = Analysis(
 
     binaries=binary_files,
 
-    datas=[
-        # Rootfs included as runtime data
-        ('rootfs', 'rootfs'),
-    ],
+    datas=datas,
 
-    hiddenimports=collect_all('rich'),
+    hiddenimports=rich_hiddenimports,
 
     hookspath=[],
 
