@@ -193,6 +193,9 @@ def sanitize_env():
 # ----------------------------
 # USER REGISTER
 # ----------------------------
+# ----------------------------
+# USER REGISTER
+# ----------------------------
 def register_user(
     distro,
     username,
@@ -217,31 +220,70 @@ def register_user(
         .workdir("/")
     )
 
+    print("[*] Installing user management tools...")
+
+    install_cmd = r"""
+if command -v apt >/dev/null 2>&1; then
+    apt update &&
+    DEBIAN_FRONTEND=noninteractive apt install -y \
+        passwd \
+        login \
+        sudo \
+        bash \
+        coreutils
+
+elif command -v apk >/dev/null 2>&1; then
+    apk add shadow sudo bash
+
+elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sy --noconfirm shadow sudo bash
+
+elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y shadow-utils sudo bash
+fi
+"""
+
     cmds = [
         f"useradd -m -s {shell} {username}",
         f"echo '{username}:{password}' | chpasswd"
     ]
 
     if is_root:
-        if (rootfs / "usr/bin/apt").exists():
+        # sudo grubu distroya göre değişebilir
+        if (rootfs / "etc/debian_version").exists():
             cmds.append(
                 f"usermod -aG sudo {username}"
             )
 
-        elif (rootfs / "usr/bin/pacman").exists():
+            sudoers_fix = (
+                "echo '%sudo ALL=(ALL:ALL) ALL' "
+                "> /etc/sudoers.d/devstick"
+            )
+
+            cmds.append(sudoers_fix)
+
+        else:
             cmds.append(
                 f"usermod -aG wheel {username}"
             )
 
-    full_cmd = " && ".join(cmds)
+    full_cmd = (
+        install_cmd
+        + "\n && "
+        + " && ".join(cmds)
+    )
 
-    subprocess.run(
+    result = subprocess.run(
         pr.build_argv([
             "/bin/sh",
             "-c",
             full_cmd
         ])
     )
+
+    if result.returncode != 0:
+        print("[!] Failed to create user")
+        sys.exit(1)
 
     users = load_users()
 
