@@ -24,7 +24,7 @@ a = Analysis(
         ('rootfs', 'rootfs'),
     ],
 
-    hiddenimports=[],
+    hiddenimports=collect_all('rich'),
 
     hookspath=[],
 
