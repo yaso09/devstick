@@ -118,7 +118,6 @@ class TempBindDistro:
                 "-b", "/sdcard:/sdcard",
 
                 "-w", home,
-                "--"
             ]
 
             env = os.environ.copy()
