@@ -23,6 +23,9 @@ UBUNTU = ROOTFS_DIR / "ubuntu"
 
 GITHUB_API = "https://api.github.com/repos/yaso09/devstick/releases/latest"
 
+# pyproot tarafından indirilen binary'lerin bulunduğu dizin
+PYPROOT_BINARIES_DIR = BASE_DIR / "pyproot" / "binaries"
+
 
 # ----------------------------
 # SYSTEM INFO
@@ -50,29 +53,88 @@ def resolve_shell(rootfs: Path):
 # ----------------------------
 # PROOT BINARY
 # ----------------------------
-def proot_binary():
+def proot_binary() -> str:
+    """
+    Resolution order:
+      1. pyproot/binaries/proot-<arch>-android  (Termux)
+      2. pyproot/binaries/proot-<arch>          (desktop)
+      3. proot/  klasöründeki eski binary
+      4. system proot
+    """
     a = arch()
+    android = is_termux()
 
+    # 1. pyproot/binaries içindeki binary
+    if android:
+        candidate = PYPROOT_BINARIES_DIR / f"proot-{a}-android"
+        if candidate.exists():
+            return str(candidate)
+
+    candidate = PYPROOT_BINARIES_DIR / f"proot-{a}"
+    if candidate.exists():
+        return str(candidate)
+
+    # 2. Eski proot/ dizini (geriye dönük uyumluluk)
     if a == "aarch64":
-        p = PROOT_DIR / "arm64" / "proot"
+        legacy = PROOT_DIR / "arm64" / "proot"
     elif a == "x86_64":
-        p = PROOT_DIR / "x86_64" / "proot"
+        legacy = PROOT_DIR / "x86_64" / "proot"
     else:
-        print(f"[!] Unsupported arch: {a}")
-        sys.exit(1)
+        legacy = None
 
-    return str(p) if p.exists() else "proot"
+    if legacy and legacy.exists():
+        return str(legacy)
+
+    # 3. System proot
+    system = shutil.which("proot")
+    if system:
+        return system
+
+    print(f"[!] No proot binary found for arch: {a}")
+    sys.exit(1)
 
 
-def proot_distro_binary():
+def proot_distro_binary() -> str:
     p = PROOT_DIR / "proot-distro"
     return str(p) if p.exists() else "proot-distro"
+
+
+def _inject_proot_to_path():
+    """
+    Termux'ta proot-distro'nun shutil.which("proot") ile
+    bizim binary'mizi bulması için PATH'e enjekte et.
+    """
+    if not PYPROOT_BINARIES_DIR.exists():
+        return
+
+    a = arch()
+
+    # android binary varsa onu, yoksa desktop binary'yi "proot" adıyla symlink/copy et
+    android_bin = PYPROOT_BINARIES_DIR / f"proot-{a}-android"
+    desktop_bin = PYPROOT_BINARIES_DIR / f"proot-{a}"
+    proot_link  = PYPROOT_BINARIES_DIR / "proot"
+
+    source = android_bin if android_bin.exists() else desktop_bin if desktop_bin.exists() else None
+
+    if source and not proot_link.exists():
+        try:
+            proot_link.symlink_to(source)
+        except OSError:
+            # symlink başarısız olursa kopyala
+            import shutil as _shutil
+            _shutil.copy2(str(source), str(proot_link))
+            proot_link.chmod(proot_link.stat().st_mode | 0o111)
+
+    # PATH'e en başa ekle
+    current_path = os.environ.get("PATH", "")
+    binaries_str = str(PYPROOT_BINARIES_DIR)
+    if binaries_str not in current_path.split(":"):
+        os.environ["PATH"] = binaries_str + ":" + current_path
+
 
 # ----------------------------
 # ENV SANITIZER (IMPORTANT)
 # ----------------------------
-
-
 def sanitize_env():
     os.environ.pop("SHELL", None)
     os.environ["SHELL"] = "/bin/bash"
@@ -106,23 +168,9 @@ def run_distro(name):
     print(f"[*] Shell: {shell}")
     print("[*] Starting Devstick...\n")
 
-    cmd = [
-        proot,
-        "-0",
-        "-r", str(rootfs),
-
-        "-b", "/dev",
-        "-b", "/proc",
-        "-b", "/sys",
-
-        "-w", "/root",
-
-        shell
-    ]
-
-    # os.execvp(cmd[0], cmd)
-
     if is_termux():
+        # proot-distro shutil.which("proot") kullandığı için PATH'e enjekte et
+        _inject_proot_to_path()
         run_distro_temp(name, rootfs)
     else:
         start_sandbox(
@@ -159,14 +207,11 @@ def install_dependencies():
     if pm == "pkg":
         subprocess.run(["pkg", "install", "-y", "debootstrap", "proot"])
     elif pm == "apt":
-        subprocess.run(["sudo", "apt", "install",
-                       "-y", "debootstrap", "proot"])
+        subprocess.run(["sudo", "apt", "install", "-y", "debootstrap", "proot"])
     elif pm == "dnf":
-        subprocess.run(["sudo", "dnf", "install",
-                       "-y", "debootstrap", "proot"])
+        subprocess.run(["sudo", "dnf", "install", "-y", "debootstrap", "proot"])
     elif pm == "pacman":
-        subprocess.run(
-            ["sudo", "pacman", "-S", "--noconfirm", "debootstrap", "proot"])
+        subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "debootstrap", "proot"])
     elif pm == "apk":
         subprocess.run(["sudo", "apk", "add", "debootstrap", "proot"])
 
@@ -206,18 +251,17 @@ def install_ubuntu():
 
     subprocess.run(cmd)
 
+
 # ----------------------------
 # DEBOOTSTRAP INSTALL
 # ----------------------------
-
-
 def install_rootfs():
     ROOTFS_DIR.mkdir(exist_ok=True)
 
     install_debian()
     install_ubuntu()
 
-    print("[u2713] Install complete")
+    print("[✓] Install complete")
 
 
 def install():
@@ -226,11 +270,10 @@ def install():
     install_dependencies()
     install_rootfs()
 
+
 # ----------------------------
 # REMOVE ROOTFS
 # ----------------------------
-
-
 def remove(name):
     rootfs = None
     if name == "debian":
@@ -242,16 +285,15 @@ def remove(name):
         sys.exit(1)
     if rootfs.exists():
         subprocess.run(["rm", "-rf", str(rootfs)])
-        print(f"[u2713] Removed {name}")
+        print(f"[✓] Removed {name}")
     else:
         print("[!] Rootfs not found.")
         sys.exit(1)
 
+
 # ----------------------------
 # UPDATE CHECK (GITHUB RELEASES)
 # ----------------------------
-
-
 def get_latest_release():
     try:
         data = json.loads(urllib.request.urlopen(GITHUB_API).read().decode())
@@ -275,7 +317,7 @@ def update():
     print(f"[*] Latest : {latest}")
 
     if current == latest:
-        print("[u2713] Up to date")
+        print("[✓] Up to date")
         return
 
     print("[*] Update available (manual apply recommended)")
