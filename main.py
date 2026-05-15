@@ -60,6 +60,7 @@ def print_help():
     commands.add_row("install <distro>",       "Install a specific distro")
     commands.add_row("  --reinstall",          "Remove existing rootfs before installing")
     commands.add_row("run <distro>",           "Start an interactive shell")
+    commands.add_row("tui", "Start Devstick TUI")
     commands.add_row("  --user <username>",    "Log in as a specific user")
     commands.add_row("  -- <cmd> [args...]",   "Run a command instead of a shell")
     commands.add_row("register <distro>",      "Create a new user")
@@ -698,6 +699,15 @@ def main():
                 err(f"Unknown distro: {distro}")
         else:
             install(reinstall)
+
+    # ── tui ──────────────────────────────
+    elif cmd == "tui":
+        if len(args) > 2:
+            err("Usage: devstick tui")
+            sys.exit(1)
+
+        from tui import DevstickTUI
+        DevstickTUI().run()
 
     # ── run ──────────────────────────────
     elif cmd == "run":
